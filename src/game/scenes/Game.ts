@@ -55,13 +55,24 @@ export class Game extends Scene {
     
         }); */
     }
-
-    t(props) {
-        this.tweens.add({
+    t2?: Phaser.Tweens.Tween
+    t(props: { [key: string]: any }, angle: number) {
+        if (this.t2 && this.t2.isActive()) {
+            return
+        }
+        this.player.setAngle(angle)
+        const zhis = this
+        this.t2 = this.tweens.add({
             targets: this.player,
             ease: 'Cubic',       // 'Cubic', 'Elastic', 'Bounce', 'Back'
             duration: 200,
-            ...props
+            ...props,
+            onStart: function () {
+                zhis.player.anims.play('move', true);
+            },
+            onComplete: function () {
+                zhis.player.anims.play('turn');
+            }
         });
     }
 
@@ -71,36 +82,16 @@ export class Game extends Scene {
 
 
         if (this.cursor.left.isDown) {
-            //this.player.setVelocity(-160, 0);
-            this.player.setAngle(-90)
-            this.t({ x: "-=20" })
-
-            this.player.anims.play('move', true);
-            //            this.player.setRotation(.5)
+            this.t({ x: "-=40" }, -90)
         }
         else if (this.cursor.right.isDown) {
-            this.t({ x: "+=20" })
-            this.player.setAngle(90)
-            this.player.anims.play('move', true);
-            //            this.player.setRotation(-.5)
+            this.t({ x: "+=40" }, 90)
         }
         else if (this.cursor.up.isDown) {
-            this.t({ y: "-=20" })
-            this.player.setVelocity(0, -160);
-            this.player.setAngle(0)
-            this.player.anims.play('move', true);
+            this.t({ y: "-=40" }, 0)
         }
         else if (this.cursor.down.isDown) {
-            this.t({ y: "+=20" })
-            this.player.setVelocity(0, 160);
-            this.player.setAngle(180)
-
-            this.player.anims.play('move', true);
-        }
-        else {
-            this.player.setVelocity(0, 0);
-
-            this.player.anims.play('turn');
+            this.t({ y: "+=40" }, 180)
         }
 
 
