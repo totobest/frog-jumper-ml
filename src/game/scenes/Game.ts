@@ -11,13 +11,21 @@ interface LaneConfig {
     spawnTimer: number;
 }
 
+interface PlayerContext {
+    alive: boolean;
+    sprite: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody;
+    movement?: Phaser.Tweens.Tween
+    brain: any;
+
+}
 export class Game extends Scene {
     camera!: Phaser.Cameras.Scene2D.Camera;
     background!: Phaser.GameObjects.Image;
     waterBackground!: Phaser.GameObjects.Sprite;
     msg_text!: Phaser.GameObjects.Text;
     cursor!: Phaser.Types.Input.Keyboard.CursorKeys;
-    player!: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody
+    players!: PlayerContext[]
+    numPlayers: number = 30;
     lanes!: LaneConfig[];
     gameWidth: number = 640;
     gameHeight: number = 880;
@@ -30,7 +38,6 @@ export class Game extends Scene {
     }
 
     create() {
-        this.myNetwork = architect.Perceptron(8, 6, 4)
         this.camera = this.cameras.main;
         this.camera.setBackgroundColor(0x00ff00);
 
@@ -57,12 +64,23 @@ export class Game extends Scene {
         this.background = this.add.image(320, 420, 'bg_game');
         this.background.setDepth(0); // Above water but below game objects
         //this.background.setAlpha(0);
-        this.player = this.physics.add.sprite(this.playerStartX, this.playerStartY, 'frog');
-        this.player.setCollideWorldBounds(true);
-        this.player.setDepth(10); // Above everything
+        this.players = []
+        for (let i = 0; i < this.numPlayers; i++) {
 
-        // Set fixed collision box size (32x32)
-        this.player.body.setSize(32, 32);
+            const sprite = this.physics.add.sprite(this.playerStartX, this.playerStartY, 'frog');
+            sprite.setCollideWorldBounds(true);
+            sprite.setDepth(10); // Above everything
+            // Set fixed collision box size (32x32)
+            sprite.body.setSize(32, 32);
+
+            this.players.push({
+                alive: true,
+                brain: architect.Perceptron(8, 6, 4),
+                sprite: sprite
+            })
+            sprite.setData("info", this.players[i])
+        }
+
 
 
         // Player animations
@@ -208,17 +226,22 @@ export class Game extends Scene {
         lane.cars.push(car);
 
         // Set up overlap detection for the new car
-        this.physics.add.overlap(this.player, car, this.handlePlayerCarCollision, undefined, this);
+        for (let i = 0; i < this.numPlayers; i++) {
+            if (!this.players[i].alive)
+                continue
+
+            this.physics.add.overlap(this.players[i].sprite, car, this.handlePlayerCarCollision, undefined, this);
+        }
     }
 
 
     handlePlayerCarCollision(player: any, car: any) {
         // Get player position before resetting
-        const corpseX = this.player.x;
-        const corpseY = this.player.y;
+        const corpseX = player.x;
+        const corpseY = player.y;
 
         // Reset player
-        this.resetPlayer();
+        this.resetPlayer(player);
 
         // Create corpse sprite at the collision position using frame 6 from frog spritesheet
         const corpse = this.add.sprite(corpseX, corpseY, 'frog', 6);
@@ -237,16 +260,17 @@ export class Game extends Scene {
         });
     }
 
-    resetPlayer() {
+    resetPlayer(player: any) {
+        const playerContext = player.getData("info") as PlayerContext
         // Stop any active tweens
-        if (this.t2 && this.t2.isActive()) {
-            this.t2.stop();
+        if (playerContext.movement && playerContext.movement.isActive()) {
+            playerContext.movement.stop();
         }
 
-        // Reset player position to start
-        this.player.setPosition(this.playerStartX, this.playerStartY);
-        this.player.setAngle(0);
-        this.player.anims.play('idle');
+
+        playerContext.alive = false
+        player.destroy()
+
     }
 
     updateCars(time: number, delta: number) {
@@ -292,23 +316,21 @@ export class Game extends Scene {
             } */
         });
     }
-    t2?: Phaser.Tweens.Tween
-    t(props: { [key: string]: any }, angle: number) {
-        if (this.t2 && this.t2.isActive()) {
+    jumpPlayer(playerContext: PlayerContext, props: { [key: string]: any }, angle: number) {
+        if (playerContext.movement && playerContext.movement.isActive()) {
             return
         }
-        this.player.setAngle(angle)
-        const zhis = this
-        this.t2 = this.tweens.add({
-            targets: this.player,
+        playerContext.sprite.setAngle(angle)
+        playerContext.movement = this.tweens.add({
+            targets: playerContext.sprite,
             ease: 'Cubic',       // 'Cubic', 'Elastic', 'Bounce', 'Back'
             duration: 200,
             ...props,
             onStart: function () {
-                zhis.player.anims.play('move', true);
+                playerContext.sprite.anims.play('move', true);
             },
             onComplete: function () {
-                zhis.player.anims.play('idle');
+                playerContext.sprite.anims.play('idle');
             }
         });
     }
@@ -318,18 +340,26 @@ export class Game extends Scene {
         // Update cars
         this.updateCars(time, delta);
 
-        const [left, right, up, down] = this.myNetwork.activate([0, 0, 0, 0, 0, 0, 0, 0]) as [number, number, number, number]
-        if (left >= 0.5) {
-            this.t({ x: "-=40" }, -90)
-        }
-        else if (right >= 0.5) {
-            this.t({ x: "+=40" }, 90)
-        }
-        else if (up >= 0.5) {
-            this.t({ y: "-=40" }, 0)
-        }
-        else if (down >= 0.5) {
-            this.t({ y: "+=40" }, 180)
+        if (time < 3000)
+            return
+
+        for (let i = 0; i < this.numPlayers; i++) {
+            const playerContext = this.players[i]
+            if (!playerContext.alive)
+                continue
+            const [left, right, up, down] = playerContext.brain.activate([0, 0, 0, 0, 0, 0, 0, 0]) as [number, number, number, number]
+            if (left >= 0.5) {
+                this.jumpPlayer(playerContext, { x: "-=40" }, -90)
+            }
+            else if (right >= 0.5) {
+                this.jumpPlayer(playerContext, { x: "+=40" }, 90)
+            }
+            else if (up >= 0.5) {
+                this.jumpPlayer(playerContext, { y: "-=40" }, 0)
+            }
+            else if (down >= 0.5) {
+                this.jumpPlayer(playerContext, { y: "+=40" }, 180)
+            }
         }
 
         /*if (this.cursor.left.isDown) {
