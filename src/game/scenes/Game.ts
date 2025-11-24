@@ -14,7 +14,7 @@ interface LaneConfig {
 interface PlayerContext {
     alive: boolean;
     sprite: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody;
-    movement?: Phaser.Tweens.Tween
+    movement: Phaser.Tweens.Tween | null
     brain: any;
 
 }
@@ -25,19 +25,19 @@ export class Game extends Scene {
     msg_text!: Phaser.GameObjects.Text;
     cursor!: Phaser.Types.Input.Keyboard.CursorKeys;
     players!: PlayerContext[]
-    numPlayers: number = 30;
+    numPlayers: number = 1;
     lanes!: LaneConfig[];
     gameWidth: number = 640;
     gameHeight: number = 880;
     playerStartX: number = 320;
     playerStartY: number = 780;
-    myNetwork: any;
-
+    lastResetTimer: number
     constructor() {
         super('Game');
     }
 
     create() {
+        this.lastResetTimer = 0;
         this.camera = this.cameras.main;
         this.camera.setBackgroundColor(0x00ff00);
 
@@ -76,9 +76,10 @@ export class Game extends Scene {
             this.players.push({
                 alive: true,
                 brain: architect.Perceptron(8, 6, 4),
-                sprite: sprite
+                sprite: sprite,
+                movement: null
             })
-            sprite.setData("info", this.players[i])
+            sprite.setData("context", this.players[i])
         }
 
 
@@ -241,7 +242,7 @@ export class Game extends Scene {
         const corpseY = player.y;
 
         // Reset player
-        this.resetPlayer(player);
+        this.killPlayer(player);
 
         // Create corpse sprite at the collision position using frame 6 from frog spritesheet
         const corpse = this.add.sprite(corpseX, corpseY, 'frog', 6);
@@ -260,8 +261,30 @@ export class Game extends Scene {
         });
     }
 
-    resetPlayer(player: any) {
-        const playerContext = player.getData("info") as PlayerContext
+    resetGame() {
+        for (let i = 0; i < this.numPlayers; i++) {
+            const playerContext = this.players[i]
+            if (playerContext.alive) {
+                if (playerContext.movement) {
+                    playerContext.movement.stop()
+                    playerContext.movement = null
+                }
+                playerContext.sprite.destroy()
+            }
+            const sprite = this.physics.add.sprite(this.playerStartX, this.playerStartY, 'frog');
+            sprite.setCollideWorldBounds(true);
+            sprite.setDepth(10); // Above everything
+            // Set fixed collision box size (32x32)
+            sprite.body.setSize(32, 32);
+            playerContext.sprite = sprite
+            playerContext.alive = true
+            this.players[i] = playerContext
+            sprite.setData("context", this.players[i])
+        }
+    }
+
+    killPlayer(player: any) {
+        const playerContext = player.getData("context") as PlayerContext
         // Stop any active tweens
         if (playerContext.movement && playerContext.movement.isActive()) {
             playerContext.movement.stop();
@@ -320,7 +343,7 @@ export class Game extends Scene {
         if (playerContext.movement && playerContext.movement.isActive()) {
             return
         }
-        playerContext.sprite.setAngle(angle)
+        playerContext.sprite.setAngle(playerContext.sprite.angle + 10)
         playerContext.movement = this.tweens.add({
             targets: playerContext.sprite,
             ease: 'Cubic',       // 'Cubic', 'Elastic', 'Bounce', 'Back'
@@ -335,8 +358,63 @@ export class Game extends Scene {
         });
     }
 
+    /**
+     * Get sensor inputs for a player. Returns 8 values (0 or 1) representing
+     * car detection at 8 positions around the player (cardinal + diagonal).
+     * Each sensor is at approximately 32px distance from the player.
+     * Order: N, NE, E, SE, S, SW, W, NW
+     */
+    getSensorInputs(playerContext: PlayerContext): number[] {
+        const playerX = playerContext.sprite.x;
+        const playerY = playerContext.sprite.y;
+        const sensorDistance = 32;
+        const diagonalOffset = sensorDistance * Math.cos(Math.PI / 4); // ~22.6px for 45 degrees
+
+        // Define 8 sensor positions relative to player
+        const sensorPositions = [
+            { x: 0, y: -sensorDistance },              // 0: North
+            { x: diagonalOffset, y: -diagonalOffset }, // 1: Northeast
+            { x: sensorDistance, y: 0 },               // 2: East
+            { x: diagonalOffset, y: diagonalOffset },  // 3: Southeast
+            { x: 0, y: sensorDistance },               // 4: South
+            { x: -diagonalOffset, y: diagonalOffset },  // 5: Southwest
+            { x: -sensorDistance, y: 0 },              // 6: West
+            { x: -diagonalOffset, y: -diagonalOffset }  // 7: Northwest
+        ];
+
+        const sensorValues: number[] = [];
+
+        for (const sensorPos of sensorPositions) {
+            const sensorX = playerX + sensorPos.x;
+            const sensorY = playerY + sensorPos.y;
+            let carDetected = 0;
+
+            // Check all cars in all lanes using Phaser's hitTest method
+            for (const lane of this.lanes) {
+                for (const car of lane.cars) {
+                    // Use hitTest to check if sensor point intersects with car body
+                    if (car.body && car.body.hitTest(sensorX, sensorY)) {
+                        carDetected = 1;
+                        break;
+                    }
+                }
+                if (carDetected === 1) break;
+            }
+
+            sensorValues.push(carDetected);
+        }
+
+        return sensorValues;
+    }
+
 
     update(time: number, delta: number): void {
+
+        if (time > this.lastResetTimer + 10000) {
+            this.lastResetTimer = time
+            this.resetGame()
+        }
+
         // Update cars
         this.updateCars(time, delta);
 
@@ -347,7 +425,14 @@ export class Game extends Scene {
             const playerContext = this.players[i]
             if (!playerContext.alive)
                 continue
-            const [left, right, up, down] = playerContext.brain.activate([0, 0, 0, 0, 0, 0, 0, 0]) as [number, number, number, number]
+            if (playerContext.movement && playerContext.movement.isActive()) {
+                return
+            }
+
+            // Get sensor inputs (8 sensors detecting cars around player)
+            const sensorInputs = this.getSensorInputs(playerContext);
+            const [left, right, up, down] = playerContext.brain.activate(sensorInputs) as [number, number, number, number]
+            //console.log(i, sensorInputs)
             if (left >= 0.5) {
                 this.jumpPlayer(playerContext, { x: "-=40" }, -90)
             }
