@@ -1,8 +1,9 @@
 import { Scene } from "phaser";
-import { Architect } from "synaptic";
+import { Architect, Network } from "synaptic";
 import {
   CROSSOVER_WINNER_COUNT,
   MAX_FROGS,
+  MUTATE_RATE,
   TOP_WINNERS_COUNT,
 } from "../constants";
 import { SensorLane, computeSensorInputs } from "../sensors";
@@ -21,7 +22,10 @@ export interface FrogContext {
   alive: boolean;
   sprite: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody;
   movement: Phaser.Tweens.Tween | null;
-  brain: Architect.Perceptron;
+  brain: Network;
+}
+export interface SynapticConnectionJSONFormat {
+  weight: number;
 }
 
 export interface SynapticNeuronJSONFormat {
@@ -30,14 +34,7 @@ export interface SynapticNeuronJSONFormat {
 
 export interface SynapticNetworkJSONFormat {
   neurons: SynapticNeuronJSONFormat[];
-}
-
-declare module "synaptic" {
-    namespace Architect {
-        interface Perceptron {
-            toJSON(): SynapticNetworkJSONFormat;
-        }
-    }
+  connections: SynapticConnectionJSONFormat[];
 }
 export class Game extends Scene {
   camera!: Phaser.Cameras.Scene2D.Camera;
@@ -291,7 +288,8 @@ export class Game extends Scene {
     });
   }
   getRandomBrain(winners: FrogContext[]) {
-    return winners[0].brain;
+    const randomWinner = Phaser.Utils.Array.GetRandom(winners);
+    return randomWinner.brain;
   }
 
   getRandomProbBrain(array: FrogContext[]) {
@@ -339,19 +337,18 @@ export class Game extends Scene {
         offspring = this.crossOver(parentA, parentB);
       } else {
         // clone from a random winner based upon fitness
-        offspring = this.getRandomProbBrain(winners).toJSON();
+        offspring = this.getRandomProbBrain(winners).brain.toJSON();
       }
 
       // mutate offspring for randomness of evolution
       offspring = this.mutation(offspring);
 
-      const newBrain = synaptic.Network.fromJSON(offspring);
+      const newBrain = Network.fromJSON(offspring);
 
-      this.brains[i].gameObject.registerBrain(newBrain);
-      this.brains[i] = newBrain;
+      this.frogs[i].brain = newBrain;
     }
 
-    this.brains.sort((a, b) => a.index - b.index);
+    //this.brains.sort((a, b) => a.index - b.index);
   }
 
   computeFitness(playerContext: FrogContext) {
@@ -381,19 +378,19 @@ export class Game extends Scene {
     return Phaser.Math.Between(0, 1) === 1 ? parentA : parentB;
   }
 
-  mutation(offspring: FrogContext) {
-    offspring.brain.neurons.forEach((neuron) => {
+  mutation(offspring: SynapticNetworkJSONFormat) {
+    offspring.neurons.forEach((neuron) => {
       neuron.bias = this.mutate(neuron.bias);
     });
 
-    offspring.brain.connections.forEach((connection) => {
+    offspring.connections.forEach((connection) => {
       connection.weight = this.mutate(connection.weight);
     });
 
     return offspring;
   }
-  mutate(gene) {
-    if (Math.random() < this.mutateRate) {
+  mutate(gene: number) {
+    if (Math.random() < MUTATE_RATE) {
       const mutateFactor =
         1 + ((Math.random() - 0.5) * 3 + Math.random() - 0.5);
       gene *= mutateFactor;
