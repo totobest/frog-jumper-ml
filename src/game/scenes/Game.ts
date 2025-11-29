@@ -1,117 +1,136 @@
-import { Scene } from 'phaser';
-import { Architect } from 'synaptic'
-import { MAX_FROGS } from '../constants';
-import { SensorLane, computeSensorInputs } from '../sensors';
+import { Scene } from "phaser";
+import { Architect } from "synaptic";
+import {
+  CROSSOVER_WINNER_COUNT,
+  MAX_FROGS,
+  TOP_WINNERS_COUNT,
+} from "../constants";
+import { SensorLane, computeSensorInputs } from "../sensors";
 
 export interface LaneConfig extends SensorLane {
-    y: number;
-    speed: number;
-    direction: 'left' | 'right';
-    spawnRate: number; // milliseconds between spawns
-    maxCars: number; // maximum number of cars (1-3)
-    cars: Phaser.Types.Physics.Arcade.ImageWithStaticBody[];
-    spawnTimer: number;
+  y: number;
+  speed: number;
+  direction: "left" | "right";
+  spawnRate: number; // milliseconds between spawns
+  maxCars: number; // maximum number of cars (1-3)
+  cars: Phaser.Types.Physics.Arcade.ImageWithStaticBody[];
+  spawnTimer: number;
 }
 
-export interface PlayerContext {
-    alive: boolean;
-    sprite: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody;
-    movement: Phaser.Tweens.Tween | null
-    brain: Architect.Perceptron;
+export interface FrogContext {
+  alive: boolean;
+  sprite: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody;
+  movement: Phaser.Tweens.Tween | null;
+  brain: Architect.Perceptron;
+}
 
+export interface SynapticNeuronJSONFormat {
+  bias: number;
+}
+
+export interface SynapticNetworkJSONFormat {
+  neurons: SynapticNeuronJSONFormat[];
+}
+
+declare module "synaptic" {
+    namespace Architect {
+        interface Perceptron {
+            toJSON(): SynapticNetworkJSONFormat;
+        }
+    }
 }
 export class Game extends Scene {
-    camera!: Phaser.Cameras.Scene2D.Camera;
-    background!: Phaser.GameObjects.Image;
-    waterBackground!: Phaser.GameObjects.Sprite;
-    msg_text!: Phaser.GameObjects.Text;
-    cursor!: Phaser.Types.Input.Keyboard.CursorKeys;
-    frogs!: PlayerContext[]
-    numPlayers: number = 4;
-    lanes!: LaneConfig[];
-    gameWidth: number = 640;
-    gameHeight: number = 880;
-    playerStartX: number = 320;
-    playerStartY: number = 780;
-    lastResetTimer: number
-    constructor() {
-        super('Game');
+  camera!: Phaser.Cameras.Scene2D.Camera;
+  background!: Phaser.GameObjects.Image;
+  waterBackground!: Phaser.GameObjects.Sprite;
+  msg_text!: Phaser.GameObjects.Text;
+  cursor!: Phaser.Types.Input.Keyboard.CursorKeys;
+  frogs!: FrogContext[];
+  numPlayers: number = 4;
+  lanes!: LaneConfig[];
+  gameWidth: number = 640;
+  gameHeight: number = 880;
+  playerStartX: number = 320;
+  playerStartY: number = 780;
+  lastResetTimer: number;
+  constructor() {
+    super("Game");
+  }
+
+  create() {
+    this.lastResetTimer = 0;
+    this.camera = this.cameras.main;
+    this.camera.setBackgroundColor(0x00ff00);
+
+    // Create animated water background
+    this.waterBackground = this.add.sprite(320, 240, "water_anim_0");
+    this.waterBackground.setDepth(-1); // Behind everything else
+
+    // Create water animation frames from individual images
+    const waterFrameObjects = [];
+    for (let i = 0; i <= 9; i++) {
+      waterFrameObjects.push({ key: `water_anim_${i}` });
     }
 
-    create() {
-        this.lastResetTimer = 0;
-        this.camera = this.cameras.main;
-        this.camera.setBackgroundColor(0x00ff00);
+    this.anims.create({
+      key: "water_animate",
+      frames: waterFrameObjects,
+      frameRate: 12, // Adjust speed as needed
+      repeat: -1, // Loop infinitely
+    });
 
-        // Create animated water background
-        this.waterBackground = this.add.sprite(320, 240, 'water_anim_0');
-        this.waterBackground.setDepth(-1); // Behind everything else
+    // Start water animation
+    this.waterBackground.play("water_animate");
 
-        // Create water animation frames from individual images
-        const waterFrameObjects = [];
-        for (let i = 0; i <= 9; i++) {
-            waterFrameObjects.push({ key: `water_anim_${i}` });
-        }
+    this.background = this.add.image(320, 420, "bg_game");
+    this.background.setDepth(0); // Above water but below game objects
+    //this.background.setAlpha(0);
+    this.frogs = [];
+    for (let i = 0; i < this.numPlayers; i++) {
+      const sprite = this.physics.add.sprite(
+        this.playerStartX,
+        this.playerStartY,
+        "frog",
+      );
+      sprite.setCollideWorldBounds(true);
+      sprite.setDepth(10); // Above everything
+      // Set fixed collision box size (32x32)
+      sprite.body.setSize(32, 32);
 
-        this.anims.create({
-            key: 'water_animate',
-            frames: waterFrameObjects,
-            frameRate: 12, // Adjust speed as needed
-            repeat: -1 // Loop infinitely
-        });
+      const brain = new Architect.Perceptron(8, 16, 4);
+      brain.setOptimize(false);
 
-        // Start water animation
-        this.waterBackground.play('water_animate');
+      const playerContext: FrogContext = {
+        alive: true,
+        brain: brain,
+        sprite: sprite,
+        movement: null,
+      };
+      this.frogs.push(playerContext);
 
-        this.background = this.add.image(320, 420, 'bg_game');
-        this.background.setDepth(0); // Above water but below game objects
-        //this.background.setAlpha(0);
-        this.frogs = []
-        for (let i = 0; i < this.numPlayers; i++) {
+      sprite.setData("context", this.frogs[i]);
+    }
 
-            const sprite = this.physics.add.sprite(this.playerStartX, this.playerStartY, 'frog');
-            sprite.setCollideWorldBounds(true);
-            sprite.setDepth(10); // Above everything
-            // Set fixed collision box size (32x32)
-            sprite.body.setSize(32, 32);
+    // Player animations
+    this.anims.create({
+      key: "move",
+      frames: this.anims.generateFrameNumbers("frog", { start: 1, end: 5 }),
+      frameRate: 20,
+      repeat: -1,
+    });
 
-            const brain = new Architect.Perceptron(8, 16, 4)
-            brain.setOptimize(false)
+    this.anims.create({
+      key: "idle",
+      frames: [{ key: "frog", frame: 0 }],
+      frameRate: 20,
+    });
 
-            const playerContext: PlayerContext = {
-                alive: true,
-                brain: brain,
-                sprite: sprite,
-                movement: null
-            }
-            this.frogs.push(playerContext)
+    this.cursor = this.input.keyboard!.createCursorKeys();
 
-            sprite.setData("context", this.frogs[i])
-        }
+    // Initialize car lanes
+    this.initCarLanes();
 
-
-
-        // Player animations
-        this.anims.create({
-            key: 'move',
-            frames: this.anims.generateFrameNumbers('frog', { start: 1, end: 5 }),
-            frameRate: 20,
-            repeat: -1
-        });
-
-        this.anims.create({
-            key: 'idle',
-            frames: [{ key: 'frog', frame: 0 }],
-            frameRate: 20
-        });
-
-
-        this.cursor = this.input.keyboard!.createCursorKeys();
-
-        // Initialize car lanes
-        this.initCarLanes();
-
-        /*
+    /*
     this.msg_text = this.add.text(512, 384, 'Make something fun!\nand share it with us:\nsupport@phaser.io', {
         fontFamily: 'Arial Black', fontSize: 38, color: '#ffffff',
         stroke: '#000000', strokeThickness: 8,
@@ -119,425 +138,462 @@ export class Game extends Scene {
     });
     this.msg_text.setOrigin(0.5);
     */
-        /* this.input.once('pointerdown', () => {
+    /* this.input.once('pointerdown', () => {
     
             this.scene.start('GameOver');
     
         }); */
-    }
+  }
 
-    initCarLanes() {
-        // Calculate lane positions (distributed across the screen height)
-        const laneSpacing = 51; // Divide screen into 5 sections, use 4 for lanes
-        const startY = 454;
+  initCarLanes() {
+    // Calculate lane positions (distributed across the screen height)
+    const laneSpacing = 51; // Divide screen into 5 sections, use 4 for lanes
+    const startY = 454;
 
-        this.lanes = [
-            {
-                y: startY,
-                speed: 150, // pixels per second
-                direction: 'right', // left to right
-                spawnRate: 2000, // spawn every 2 seconds
-                maxCars: 2,
-                cars: [],
-                spawnTimer: 0
-            },
-            {
-                y: startY + laneSpacing,
-                speed: 200,
-                direction: 'left', // right to left
-                spawnRate: 4000, // spawn every 1.5 seconds
-                maxCars: 1,
-                cars: [],
-                spawnTimer: 0
-            },
-            {
-                y: startY + laneSpacing * 2,
-                speed: 80,
-                direction: 'right', // left to right
-                spawnRate: 2500, // spawn every 2.5 seconds
-                maxCars: 3,
-                cars: [],
-                spawnTimer: 0
-            },
-            {
-                y: startY + laneSpacing * 3,
-                speed: 120,
-                direction: 'left', // right to left
-                spawnRate: 1800, // spawn every 1.8 seconds
-                maxCars: 2,
-                cars: [],
-                spawnTimer: 0
-            },
-            {
-                y: startY + laneSpacing * 4,
-                speed: 120,
-                direction: 'right', // right to left
-                spawnRate: 2800, // spawn every 1.8 seconds
-                maxCars: 2,
-                cars: [],
-                spawnTimer: 0
-            }
-        ];
+    this.lanes = [
+      {
+        y: startY,
+        speed: 150, // pixels per second
+        direction: "right", // left to right
+        spawnRate: 2000, // spawn every 2 seconds
+        maxCars: 2,
+        cars: [],
+        spawnTimer: 0,
+      },
+      {
+        y: startY + laneSpacing,
+        speed: 200,
+        direction: "left", // right to left
+        spawnRate: 4000, // spawn every 1.5 seconds
+        maxCars: 1,
+        cars: [],
+        spawnTimer: 0,
+      },
+      {
+        y: startY + laneSpacing * 2,
+        speed: 80,
+        direction: "right", // left to right
+        spawnRate: 2500, // spawn every 2.5 seconds
+        maxCars: 3,
+        cars: [],
+        spawnTimer: 0,
+      },
+      {
+        y: startY + laneSpacing * 3,
+        speed: 120,
+        direction: "left", // right to left
+        spawnRate: 1800, // spawn every 1.8 seconds
+        maxCars: 2,
+        cars: [],
+        spawnTimer: 0,
+      },
+      {
+        y: startY + laneSpacing * 4,
+        speed: 120,
+        direction: "right", // right to left
+        spawnRate: 2800, // spawn every 1.8 seconds
+        maxCars: 2,
+        cars: [],
+        spawnTimer: 0,
+      },
+    ];
 
-        // Spawn initial cars for each lane (minimum 1 car per lane)
-        this.lanes.forEach((lane, index) => {
-            // Spawn 1-2 initial cars per lane
-            const initialCars = Phaser.Math.Between(1, 2);
-            for (let i = 0; i < initialCars; i++) {
-                // Add delay for spacing between initial cars
-                this.time.delayedCall(i * 500, () => {
-                    this.spawnCar(index, true);
-                });
-            }
+    // Spawn initial cars for each lane (minimum 1 car per lane)
+    this.lanes.forEach((lane, index) => {
+      // Spawn 1-2 initial cars per lane
+      const initialCars = Phaser.Math.Between(1, 2);
+      for (let i = 0; i < initialCars; i++) {
+        // Add delay for spacing between initial cars
+        this.time.delayedCall(i * 500, () => {
+          this.spawnCar(index, true);
         });
+      }
+    });
+  }
+
+  spawnCar(laneIndex: number, initialSpawn: boolean = false) {
+    const lane = this.lanes[laneIndex];
+
+    // Don't spawn if lane already has max cars
+    if (lane.cars.length >= lane.maxCars) {
+      return;
     }
 
-    spawnCar(laneIndex: number, initialSpawn: boolean = false) {
-        const lane = this.lanes[laneIndex];
-
-        // Don't spawn if lane already has max cars
-        if (lane.cars.length >= lane.maxCars) {
-            return;
-        }
-
-        let startX: number;
-        if (lane.direction === 'right') {
-            // Start from left side
-            startX = -50; // Start off-screen to the left
-        } else {
-            // Start from right side
-            startX = this.gameWidth + 50; // Start off-screen to the right
-        }
-
-        // For initial spawn, position cars at different positions across the screen
-        if (initialSpawn && lane.cars.length > 0) {
-            // Calculate spacing based on existing cars
-            const spacing = this.gameWidth / (lane.cars.length + 1);
-            if (lane.direction === 'right') {
-                startX = spacing * (lane.cars.length + 1) - 50;
-            } else {
-                startX = this.gameWidth - (spacing * (lane.cars.length + 1)) + 50;
-            }
-        }
-
-        // Randomly select a car image (car_1 through car_10)
-        const carImageIndex = Phaser.Math.Between(1, 10);
-        const carImageKey = `car_${carImageIndex}`;
-        const car = this.physics.add.staticImage(startX, lane.y, carImageKey);
-        car.setDepth(5); // Above background and water, below player
-
-        // Flip car horizontally if going left
-        if (lane.direction === 'right') {
-            car.setFlipX(true);
-        }
-
-        lane.cars.push(car);
-
-        // Set up overlap detection for the new car
-        for (let i = 0; i < this.numPlayers; i++) {
-            if (!this.frogs[i].alive)
-                continue
-
-            this.physics.add.overlap(this.frogs[i].sprite, car, this.handlePlayerCarCollision, undefined, this);
-        }
+    let startX: number;
+    if (lane.direction === "right") {
+      // Start from left side
+      startX = -50; // Start off-screen to the left
+    } else {
+      // Start from right side
+      startX = this.gameWidth + 50; // Start off-screen to the right
     }
 
-
-    handlePlayerCarCollision(player: any, car: any) {
-        // Get player position before resetting
-        const corpseX = player.x;
-        const corpseY = player.y;
-
-        // Reset player
-        this.killPlayer(player);
-
-        // Create corpse sprite at the collision position using frame 6 from frog spritesheet
-        const corpse = this.add.sprite(corpseX, corpseY, 'frog', 6);
-        corpse.setDepth(4); // Above cars but below player
-        corpse.setOrigin(0.5, 0.5); // Center the sprite
-
-        // Fade out the corpse over 2 seconds
-        this.tweens.add({
-            targets: corpse,
-            alpha: 0,
-            duration: 2000,
-            ease: 'Linear',
-            onComplete: () => {
-                corpse.destroy();
-            }
-        });
+    // For initial spawn, position cars at different positions across the screen
+    if (initialSpawn && lane.cars.length > 0) {
+      // Calculate spacing based on existing cars
+      const spacing = this.gameWidth / (lane.cars.length + 1);
+      if (lane.direction === "right") {
+        startX = spacing * (lane.cars.length + 1) - 50;
+      } else {
+        startX = this.gameWidth - spacing * (lane.cars.length + 1) + 50;
+      }
     }
 
-    evolveBrains() {
-        const winners = this.selection()
+    // Randomly select a car image (car_1 through car_10)
+    const carImageIndex = Phaser.Math.Between(1, 10);
+    const carImageKey = `car_${carImageIndex}`;
+    const car = this.physics.add.staticImage(startX, lane.y, carImageKey);
+    car.setDepth(5); // Above background and water, below player
 
-        this.fitProxy.fittest = winners[0].gameObject.fitness
-
-        // Keep the top units, and evolve the rest of the population
-        for (let i = winners.length; i < MAX_FROGS; i++) {
-            let offspring
-
-            if (i < winners.length + TOP_WINNERS_COUNT) {
-                // if within topUnits + count, crossover between parents
-                const parentA = winners[0].toJSON()
-                const parentB = winners[1].toJSON()
-                offspring = this.crossOver(parentA, parentB)
-            } else if (i < this.maxUnits - CROSSOVER_WINNER_COUNT) {
-                // if within maxUnits - count, crossover between two random winners
-                const parentA = this.getRandomBrain(winners).toJSON()
-                const parentB = this.getRandomBrain(winners).toJSON()
-                offspring = this.crossOver(parentA, parentB)
-            } else {
-                // clone from a random winner based upon fitness
-                offspring = this.getRandomProbBrain(winners).toJSON()
-            }
-
-            // mutate offspring for randomness of evolution
-            offspring = this.mutation(offspring)
-
-            const newBrain = synaptic.Network.fromJSON(offspring)
-
-            this.brains[i].gameObject.registerBrain(newBrain)
-            this.brains[i] = newBrain
-        }
-
-        this.brains.sort((a, b) => a.index - b.index)
+    // Flip car horizontally if going left
+    if (lane.direction === "right") {
+      car.setFlipX(true);
     }
 
+    lane.cars.push(car);
 
-    computeFitness(playerContext: PlayerContext) {
-        return -playerContext.sprite.y
+    // Set up overlap detection for the new car
+    for (let i = 0; i < this.numPlayers; i++) {
+      if (!this.frogs[i].alive) continue;
+
+      this.physics.add.overlap(
+        this.frogs[i].sprite,
+        car,
+        this.handlePlayerCarCollision,
+        undefined,
+        this,
+      );
+    }
+  }
+
+  handlePlayerCarCollision(player: any, car: any) {
+    // Get player position before resetting
+    const corpseX = player.x;
+    const corpseY = player.y;
+
+    // Reset player
+    this.killPlayer(player);
+
+    // Create corpse sprite at the collision position using frame 6 from frog spritesheet
+    const corpse = this.add.sprite(corpseX, corpseY, "frog", 6);
+    corpse.setDepth(4); // Above cars but below player
+    corpse.setOrigin(0.5, 0.5); // Center the sprite
+
+    // Fade out the corpse over 2 seconds
+    this.tweens.add({
+      targets: corpse,
+      alpha: 0,
+      duration: 2000,
+      ease: "Linear",
+      onComplete: () => {
+        corpse.destroy();
+      },
+    });
+  }
+  getRandomBrain(winners: FrogContext[]) {
+    return winners[0].brain;
+  }
+
+  getRandomProbBrain(array: FrogContext[]) {
+    // https://natureofcode.com/book/chapter-9-the-evolution-of-code/#95-the-genetic-algorithm-part-ii-selection
+    const totalFitness = array.reduce((acc, cur) => {
+      return acc + this.computeFitness(cur);
+    }, 0);
+
+    const normalizedWinners = array.map((winner) => {
+      return {
+        brain: winner,
+        prob: this.computeFitness(winner) / totalFitness,
+      };
+    });
+
+    const winner = Math.random();
+    let threshold = 0;
+    for (let i = 0; i < normalizedWinners.length; i++) {
+      threshold += normalizedWinners[i].prob;
+      if (threshold > winner) {
+        return normalizedWinners[i].brain;
+      }
     }
 
-    selection() {
-        // sort by descending order
-        const sortedFrogs = this.frogs.sort(
-            (a, b) => this.computeFitness(b) - this.computeFitness(a)
-        )
+    return normalizedWinners[0].brain;
+  }
+  evolveBrains() {
+    const winners = this.selection();
 
-        return sortedFrogs.slice(0, 6)
+    //this.fitProxy.fittest = winners[0].gameObject.fitness;
+
+    // Keep the top units, and evolve the rest of the population
+    for (let i = winners.length; i < MAX_FROGS; i++) {
+      let offspring;
+
+      if (i < winners.length + TOP_WINNERS_COUNT) {
+        // if within topUnits + count, crossover between parents
+        const parentA = winners[0].brain.toJSON() as SynapticNetworkJSONFormat;
+        const parentB = winners[1].brain.toJSON() as SynapticNetworkJSONFormat;
+        offspring = this.crossOver(parentA, parentB);
+      } else if (i < MAX_FROGS - CROSSOVER_WINNER_COUNT) {
+        // if within maxUnits - count, crossover between two random winners
+        const parentA = this.getRandomBrain(winners).toJSON();
+        const parentB = this.getRandomBrain(winners).toJSON();
+        offspring = this.crossOver(parentA, parentB);
+      } else {
+        // clone from a random winner based upon fitness
+        offspring = this.getRandomProbBrain(winners).toJSON();
+      }
+
+      // mutate offspring for randomness of evolution
+      offspring = this.mutation(offspring);
+
+      const newBrain = synaptic.Network.fromJSON(offspring);
+
+      this.brains[i].gameObject.registerBrain(newBrain);
+      this.brains[i] = newBrain;
     }
 
-    crossOver(parentA: PlayerContext, parentB: PlayerContext) {
-        const cutPoint = Phaser.Math.Between(0, parentA.brain.neurons.length - 1)
-        for (let i = cutPoint; i < parentA.brain.neurons.length; i++) {
-            const biasFromParentA = parentA.brain.neurons[i].bias
-            parentA.brain.neurons[i].bias = parentB.brain.neurons[i].bias
-            parentB.brain.neurons[i].bias = biasFromParentA
-        }
+    this.brains.sort((a, b) => a.index - b.index);
+  }
 
-        return Phaser.Math.Between(0, 1) === 1 ? parentA : parentB
+  computeFitness(playerContext: FrogContext) {
+    return -playerContext.sprite.y;
+  }
+
+  selection() {
+    // sort by descending order
+    const sortedFrogs = this.frogs.sort(
+      (a, b) => this.computeFitness(b) - this.computeFitness(a),
+    );
+
+    return sortedFrogs.slice(0, 6);
+  }
+
+  crossOver(
+    parentA: SynapticNetworkJSONFormat,
+    parentB: SynapticNetworkJSONFormat,
+  ) {
+    const cutPoint = Phaser.Math.Between(0, parentA.neurons.length - 1);
+    for (let i = cutPoint; i < parentA.neurons.length; i++) {
+      const biasFromParentA = parentA.neurons[i].bias;
+      parentA.neurons[i].bias = parentB.neurons[i].bias;
+      parentB.neurons[i].bias = biasFromParentA;
     }
 
-    mutation(offspring: PlayerContext) {
-        offspring.brain.neurons.forEach((neuron) => {
-            neuron.bias = this.mutate(neuron.bias)
-        })
+    return Phaser.Math.Between(0, 1) === 1 ? parentA : parentB;
+  }
 
-        offspring.brain.connections.forEach((connection) => {
-            connection.weight = this.mutate(connection.weight)
-        })
+  mutation(offspring: FrogContext) {
+    offspring.brain.neurons.forEach((neuron) => {
+      neuron.bias = this.mutate(neuron.bias);
+    });
 
-        return offspring
+    offspring.brain.connections.forEach((connection) => {
+      connection.weight = this.mutate(connection.weight);
+    });
+
+    return offspring;
+  }
+  mutate(gene) {
+    if (Math.random() < this.mutateRate) {
+      const mutateFactor =
+        1 + ((Math.random() - 0.5) * 3 + Math.random() - 0.5);
+      gene *= mutateFactor;
     }
-    mutate(gene) {
-        if (Math.random() < this.mutateRate) {
-            const mutateFactor = 1 + ((Math.random() - 0.5) * 3 + Math.random() - 0.5)
-            gene *= mutateFactor
-        }
 
-        return gene
-    }
+    return gene;
+  }
 
-
-    resetGame() {
-        for (let i = 0; i < this.numPlayers; i++) {
-            const playerContext = this.frogs[i]
-            console.log(this.computeFitness(playerContext))
-            if (playerContext.alive) {
-                /* if (playerContext.movement) {
+  resetGame() {
+    for (let i = 0; i < this.numPlayers; i++) {
+      const playerContext = this.frogs[i];
+      console.log(this.computeFitness(playerContext));
+      if (playerContext.alive) {
+        /* if (playerContext.movement) {
                     playerContext.movement.stop()
                     playerContext.movement = null
                 } */
-                playerContext.sprite.destroy()
-            }
-            const sprite = this.physics.add.sprite(this.playerStartX, this.playerStartY, 'frog');
-            sprite.setCollideWorldBounds(true);
-            sprite.setDepth(10); // Above everything
-            // Set fixed collision box size (32x32)
-            sprite.body.setSize(32, 32);
-            playerContext.sprite = sprite
-            playerContext.alive = true
-            this.frogs[i] = playerContext
-            sprite.setData("context", this.frogs[i])
-        }
+        playerContext.sprite.destroy();
+      }
+      const sprite = this.physics.add.sprite(
+        this.playerStartX,
+        this.playerStartY,
+        "frog",
+      );
+      sprite.setCollideWorldBounds(true);
+      sprite.setDepth(10); // Above everything
+      // Set fixed collision box size (32x32)
+      sprite.body.setSize(32, 32);
+      playerContext.sprite = sprite;
+      playerContext.alive = true;
+      this.frogs[i] = playerContext;
+      sprite.setData("context", this.frogs[i]);
+    }
+  }
+
+  killPlayer(player: any) {
+    const playerContext = player.getData("context") as FrogContext;
+    // Stop any active tweens
+    if (playerContext.movement && playerContext.movement.isActive()) {
+      playerContext.movement.stop();
     }
 
-    killPlayer(player: any) {
-        const playerContext = player.getData("context") as PlayerContext
-        // Stop any active tweens
-        if (playerContext.movement && playerContext.movement.isActive()) {
-            playerContext.movement.stop();
+    playerContext.alive = false;
+    player.destroy();
+  }
+
+  updateCars(time: number, delta: number) {
+    this.lanes.forEach((lane, laneIndex) => {
+      // Update spawn timer
+      lane.spawnTimer += delta;
+
+      // Spawn new car if timer exceeds spawn rate and we have less than max cars
+      if (
+        lane.spawnTimer >= lane.spawnRate &&
+        lane.cars.length < lane.maxCars
+      ) {
+        this.spawnCar(laneIndex);
+        lane.spawnTimer = 0;
+      }
+
+      // Move cars and remove off-screen ones
+      for (let i = lane.cars.length - 1; i >= 0; i--) {
+        const car = lane.cars[i];
+
+        // Move car based on direction
+        if (lane.direction === "right") {
+          car.x += (lane.speed * delta) / 1000;
+          // Update physics body position to match visual position
+          car.body.updateFromGameObject();
+          // Remove if off-screen to the right
+          if (car.x > this.gameWidth + 50) {
+            car.destroy();
+            lane.cars.splice(i, 1);
+          }
+        } else {
+          car.x -= (lane.speed * delta) / 1000;
+          // Update physics body position to match visual position
+          car.body.updateFromGameObject();
+          // Remove if off-screen to the left
+          if (car.x < -50) {
+            car.destroy();
+            lane.cars.splice(i, 1);
+          }
         }
+      }
 
-
-        playerContext.alive = false
-        player.destroy()
-
-    }
-
-    updateCars(time: number, delta: number) {
-        this.lanes.forEach((lane, laneIndex) => {
-            // Update spawn timer
-            lane.spawnTimer += delta;
-
-            // Spawn new car if timer exceeds spawn rate and we have less than max cars
-            if (lane.spawnTimer >= lane.spawnRate && lane.cars.length < lane.maxCars) {
-                this.spawnCar(laneIndex);
-                lane.spawnTimer = 0;
-            }
-
-            // Move cars and remove off-screen ones
-            for (let i = lane.cars.length - 1; i >= 0; i--) {
-                const car = lane.cars[i];
-
-                // Move car based on direction
-                if (lane.direction === 'right') {
-                    car.x += (lane.speed * delta) / 1000;
-                    // Update physics body position to match visual position
-                    car.body.updateFromGameObject();
-                    // Remove if off-screen to the right
-                    if (car.x > this.gameWidth + 50) {
-                        car.destroy();
-                        lane.cars.splice(i, 1);
-                    }
-                } else {
-                    car.x -= (lane.speed * delta) / 1000;
-                    // Update physics body position to match visual position
-                    car.body.updateFromGameObject();
-                    // Remove if off-screen to the left
-                    if (car.x < -50) {
-                        car.destroy();
-                        lane.cars.splice(i, 1);
-                    }
-                }
-            }
-
-            // Ensure minimum 1 car per lane
-            /* if (lane.cars.length === 0) {
+      // Ensure minimum 1 car per lane
+      /* if (lane.cars.length === 0) {
                 this.spawnCar(laneIndex);
             } */
-        });
+    });
+  }
+  jumpPlayer(
+    playerContext: FrogContext,
+    props: { [key: string]: any },
+    angle: number,
+  ) {
+    if (playerContext.movement && playerContext.movement.isActive()) {
+      return;
     }
-    jumpPlayer(playerContext: PlayerContext, props: { [key: string]: any }, angle: number) {
-        if (playerContext.movement && playerContext.movement.isActive()) {
-            return
+    playerContext.sprite.setAngle(angle);
+    playerContext.movement = this.tweens.add({
+      targets: playerContext.sprite,
+      ease: "Cubic", // 'Cubic', 'Elastic', 'Bounce', 'Back'
+      duration: 200,
+      ...props,
+      onStart: function () {
+        playerContext.sprite.anims.play("move", true);
+      },
+      onComplete: function () {
+        playerContext.sprite.anims.play("idle");
+      },
+    });
+  }
+
+  /**
+   * Get sensor inputs for a player. Returns 8 values (0 or 1) representing
+   * car detection at 8 positions around the player (cardinal + diagonal).
+   * Each sensor is at approximately 32px distance from the player.
+   * Order: N, NE, E, SE, S, SW, W, NW
+   */
+  getSensorInputs(playerContext: FrogContext): number[] {
+    const playerX = playerContext.sprite.x;
+    const playerY = playerContext.sprite.y;
+    const sensorDistance = 32;
+    const diagonalOffset = sensorDistance * Math.cos(Math.PI / 4); // ~22.6px for 45 degrees
+
+    // Define 8 sensor positions relative to player
+    const sensorPositions = [
+      { x: 0, y: -sensorDistance }, // 0: North
+      { x: diagonalOffset, y: -diagonalOffset }, // 1: Northeast
+      { x: sensorDistance, y: 0 }, // 2: East
+      { x: diagonalOffset, y: diagonalOffset }, // 3: Southeast
+      { x: 0, y: sensorDistance }, // 4: South
+      { x: -diagonalOffset, y: diagonalOffset }, // 5: Southwest
+      { x: -sensorDistance, y: 0 }, // 6: West
+      { x: -diagonalOffset, y: -diagonalOffset }, // 7: Northwest
+    ];
+
+    const sensorValues: number[] = [];
+
+    for (const sensorPos of sensorPositions) {
+      const sensorX = playerX + sensorPos.x;
+      const sensorY = playerY + sensorPos.y;
+      let carDetected = 0;
+
+      // Check all cars in all lanes using Phaser's hitTest method
+      for (const lane of this.lanes) {
+        for (const car of lane.cars) {
+          // Use hitTest to check if sensor point intersects with car body
+          if (car.body && car.body.hitTest(sensorX, sensorY)) {
+            carDetected = 1;
+            break;
+          }
         }
-        playerContext.sprite.setAngle(angle)
-        playerContext.movement = this.tweens.add({
-            targets: playerContext.sprite,
-            ease: 'Cubic',       // 'Cubic', 'Elastic', 'Bounce', 'Back'
-            duration: 200,
-            ...props,
-            onStart: function () {
-                playerContext.sprite.anims.play('move', true);
-            },
-            onComplete: function () {
-                playerContext.sprite.anims.play('idle');
-            }
-        });
+        if (carDetected === 1) break;
+      }
+
+      sensorValues.push(carDetected);
     }
 
-    /**
-     * Get sensor inputs for a player. Returns 8 values (0 or 1) representing
-     * car detection at 8 positions around the player (cardinal + diagonal).
-     * Each sensor is at approximately 32px distance from the player.
-     * Order: N, NE, E, SE, S, SW, W, NW
-     */
-    getSensorInputs(playerContext: PlayerContext): number[] {
-        const playerX = playerContext.sprite.x;
-        const playerY = playerContext.sprite.y;
-        const sensorDistance = 32;
-        const diagonalOffset = sensorDistance * Math.cos(Math.PI / 4); // ~22.6px for 45 degrees
+    return sensorValues;
+  }
 
-        // Define 8 sensor positions relative to player
-        const sensorPositions = [
-            { x: 0, y: -sensorDistance },              // 0: North
-            { x: diagonalOffset, y: -diagonalOffset }, // 1: Northeast
-            { x: sensorDistance, y: 0 },               // 2: East
-            { x: diagonalOffset, y: diagonalOffset },  // 3: Southeast
-            { x: 0, y: sensorDistance },               // 4: South
-            { x: -diagonalOffset, y: diagonalOffset },  // 5: Southwest
-            { x: -sensorDistance, y: 0 },              // 6: West
-            { x: -diagonalOffset, y: -diagonalOffset }  // 7: Northwest
-        ];
-
-        const sensorValues: number[] = [];
-
-        for (const sensorPos of sensorPositions) {
-            const sensorX = playerX + sensorPos.x;
-            const sensorY = playerY + sensorPos.y;
-            let carDetected = 0;
-
-            // Check all cars in all lanes using Phaser's hitTest method
-            for (const lane of this.lanes) {
-                for (const car of lane.cars) {
-                    // Use hitTest to check if sensor point intersects with car body
-                    if (car.body && car.body.hitTest(sensorX, sensorY)) {
-                        carDetected = 1;
-                        break;
-                    }
-                }
-                if (carDetected === 1) break;
-            }
-
-            sensorValues.push(carDetected);
-        }
-
-        return sensorValues;
+  update(time: number, delta: number): void {
+    if (time > this.lastResetTimer + 10000) {
+      this.lastResetTimer = time;
+      this.resetGame();
     }
 
+    // Update cars
+    this.updateCars(time, delta);
 
-    update(time: number, delta: number): void {
+    if (time < 3000) return;
 
-        if (time > this.lastResetTimer + 10000) {
-            this.lastResetTimer = time
-            this.resetGame()
-        }
+    for (let i = 0; i < this.numPlayers; i++) {
+      const playerContext = this.frogs[i];
+      if (!playerContext.alive) continue;
+      if (playerContext.movement && playerContext.movement.isActive()) {
+        return;
+      }
 
-        // Update cars
-        this.updateCars(time, delta);
+      // Get sensor inputs (8 sensors detecting cars around player)
+      const sensorInputs = this.getSensorInputs(playerContext);
+      const [left, right, up, down] = playerContext.brain.activate(
+        sensorInputs,
+      ) as [number, number, number, number];
+      //console.log(i, sensorInputs)
+      if (left >= 0.5) {
+        this.jumpPlayer(playerContext, { x: "-=40" }, -90);
+      } else if (right >= 0.5) {
+        this.jumpPlayer(playerContext, { x: "+=40" }, 90);
+      } else if (up >= 0.5) {
+        this.jumpPlayer(playerContext, { y: "-=40" }, 0);
+      } else if (down >= 0.5) {
+        this.jumpPlayer(playerContext, { y: "+=40" }, 180);
+      }
+    }
 
-        if (time < 3000)
-            return
-
-        for (let i = 0; i < this.numPlayers; i++) {
-            const playerContext = this.frogs[i]
-            if (!playerContext.alive)
-                continue
-            if (playerContext.movement && playerContext.movement.isActive()) {
-                return
-            }
-
-            // Get sensor inputs (8 sensors detecting cars around player)
-            const sensorInputs = this.getSensorInputs(playerContext);
-            const [left, right, up, down] = playerContext.brain.activate(sensorInputs) as [number, number, number, number]
-            //console.log(i, sensorInputs)
-            if (left >= 0.5) {
-                this.jumpPlayer(playerContext, { x: "-=40" }, -90)
-            }
-            else if (right >= 0.5) {
-                this.jumpPlayer(playerContext, { x: "+=40" }, 90)
-            }
-            else if (up >= 0.5) {
-                this.jumpPlayer(playerContext, { y: "-=40" }, 0)
-            }
-            else if (down >= 0.5) {
-                this.jumpPlayer(playerContext, { y: "+=40" }, 180)
-            }
-        }
-
-        /*if (this.cursor.left.isDown) {
+    /*if (this.cursor.left.isDown) {
             this.t({ x: "-=40" }, -90)
         }
         else if (this.cursor.right.isDown) {
@@ -549,5 +605,5 @@ export class Game extends Scene {
         else if (this.cursor.down.isDown) {
             this.t({ y: "+=40" }, 180)
         }*/
-    }
+  }
 }

@@ -14,6 +14,7 @@
 		"vitest": "^2.1.4"
 	},
 	"dependencies": {
+		"@types/synaptic": "^1.0.8",
 		"phaser": "^3.90.0",
 		"synaptic": "^1.1.4"
 	}
