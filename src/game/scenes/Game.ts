@@ -1,7 +1,9 @@
 import { Scene } from 'phaser';
-import { architect } from 'neataptic'
+import { Architect } from 'synaptic'
+import { MAX_FROGS } from '../constants';
+import { SensorLane, computeSensorInputs } from '../sensors';
 
-interface LaneConfig {
+export interface LaneConfig extends SensorLane {
     y: number;
     speed: number;
     direction: 'left' | 'right';
@@ -11,11 +13,11 @@ interface LaneConfig {
     spawnTimer: number;
 }
 
-interface PlayerContext {
+export interface PlayerContext {
     alive: boolean;
     sprite: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody;
     movement: Phaser.Tweens.Tween | null
-    brain: any;
+    brain: Architect.Perceptron;
 
 }
 export class Game extends Scene {
@@ -24,8 +26,8 @@ export class Game extends Scene {
     waterBackground!: Phaser.GameObjects.Sprite;
     msg_text!: Phaser.GameObjects.Text;
     cursor!: Phaser.Types.Input.Keyboard.CursorKeys;
-    players!: PlayerContext[]
-    numPlayers: number = 1;
+    frogs!: PlayerContext[]
+    numPlayers: number = 4;
     lanes!: LaneConfig[];
     gameWidth: number = 640;
     gameHeight: number = 880;
@@ -64,7 +66,7 @@ export class Game extends Scene {
         this.background = this.add.image(320, 420, 'bg_game');
         this.background.setDepth(0); // Above water but below game objects
         //this.background.setAlpha(0);
-        this.players = []
+        this.frogs = []
         for (let i = 0; i < this.numPlayers; i++) {
 
             const sprite = this.physics.add.sprite(this.playerStartX, this.playerStartY, 'frog');
@@ -73,13 +75,18 @@ export class Game extends Scene {
             // Set fixed collision box size (32x32)
             sprite.body.setSize(32, 32);
 
-            this.players.push({
+            const brain = new Architect.Perceptron(8, 16, 4)
+            brain.setOptimize(false)
+
+            const playerContext: PlayerContext = {
                 alive: true,
-                brain: architect.Perceptron(8, 6, 4),
+                brain: brain,
                 sprite: sprite,
                 movement: null
-            })
-            sprite.setData("context", this.players[i])
+            }
+            this.frogs.push(playerContext)
+
+            sprite.setData("context", this.frogs[i])
         }
 
 
@@ -228,10 +235,10 @@ export class Game extends Scene {
 
         // Set up overlap detection for the new car
         for (let i = 0; i < this.numPlayers; i++) {
-            if (!this.players[i].alive)
+            if (!this.frogs[i].alive)
                 continue
 
-            this.physics.add.overlap(this.players[i].sprite, car, this.handlePlayerCarCollision, undefined, this);
+            this.physics.add.overlap(this.frogs[i].sprite, car, this.handlePlayerCarCollision, undefined, this);
         }
     }
 
@@ -261,14 +268,97 @@ export class Game extends Scene {
         });
     }
 
+    evolveBrains() {
+        const winners = this.selection()
+
+        this.fitProxy.fittest = winners[0].gameObject.fitness
+
+        // Keep the top units, and evolve the rest of the population
+        for (let i = winners.length; i < MAX_FROGS; i++) {
+            let offspring
+
+            if (i < winners.length + TOP_WINNERS_COUNT) {
+                // if within topUnits + count, crossover between parents
+                const parentA = winners[0].toJSON()
+                const parentB = winners[1].toJSON()
+                offspring = this.crossOver(parentA, parentB)
+            } else if (i < this.maxUnits - CROSSOVER_WINNER_COUNT) {
+                // if within maxUnits - count, crossover between two random winners
+                const parentA = this.getRandomBrain(winners).toJSON()
+                const parentB = this.getRandomBrain(winners).toJSON()
+                offspring = this.crossOver(parentA, parentB)
+            } else {
+                // clone from a random winner based upon fitness
+                offspring = this.getRandomProbBrain(winners).toJSON()
+            }
+
+            // mutate offspring for randomness of evolution
+            offspring = this.mutation(offspring)
+
+            const newBrain = synaptic.Network.fromJSON(offspring)
+
+            this.brains[i].gameObject.registerBrain(newBrain)
+            this.brains[i] = newBrain
+        }
+
+        this.brains.sort((a, b) => a.index - b.index)
+    }
+
+
+    computeFitness(playerContext: PlayerContext) {
+        return -playerContext.sprite.y
+    }
+
+    selection() {
+        // sort by descending order
+        const sortedFrogs = this.frogs.sort(
+            (a, b) => this.computeFitness(b) - this.computeFitness(a)
+        )
+
+        return sortedFrogs.slice(0, 6)
+    }
+
+    crossOver(parentA: PlayerContext, parentB: PlayerContext) {
+        const cutPoint = Phaser.Math.Between(0, parentA.brain.neurons.length - 1)
+        for (let i = cutPoint; i < parentA.brain.neurons.length; i++) {
+            const biasFromParentA = parentA.brain.neurons[i].bias
+            parentA.brain.neurons[i].bias = parentB.brain.neurons[i].bias
+            parentB.brain.neurons[i].bias = biasFromParentA
+        }
+
+        return Phaser.Math.Between(0, 1) === 1 ? parentA : parentB
+    }
+
+    mutation(offspring: PlayerContext) {
+        offspring.brain.neurons.forEach((neuron) => {
+            neuron.bias = this.mutate(neuron.bias)
+        })
+
+        offspring.brain.connections.forEach((connection) => {
+            connection.weight = this.mutate(connection.weight)
+        })
+
+        return offspring
+    }
+    mutate(gene) {
+        if (Math.random() < this.mutateRate) {
+            const mutateFactor = 1 + ((Math.random() - 0.5) * 3 + Math.random() - 0.5)
+            gene *= mutateFactor
+        }
+
+        return gene
+    }
+
+
     resetGame() {
         for (let i = 0; i < this.numPlayers; i++) {
-            const playerContext = this.players[i]
+            const playerContext = this.frogs[i]
+            console.log(this.computeFitness(playerContext))
             if (playerContext.alive) {
-                if (playerContext.movement) {
+                /* if (playerContext.movement) {
                     playerContext.movement.stop()
                     playerContext.movement = null
-                }
+                } */
                 playerContext.sprite.destroy()
             }
             const sprite = this.physics.add.sprite(this.playerStartX, this.playerStartY, 'frog');
@@ -278,8 +368,8 @@ export class Game extends Scene {
             sprite.body.setSize(32, 32);
             playerContext.sprite = sprite
             playerContext.alive = true
-            this.players[i] = playerContext
-            sprite.setData("context", this.players[i])
+            this.frogs[i] = playerContext
+            sprite.setData("context", this.frogs[i])
         }
     }
 
@@ -343,7 +433,7 @@ export class Game extends Scene {
         if (playerContext.movement && playerContext.movement.isActive()) {
             return
         }
-        playerContext.sprite.setAngle(playerContext.sprite.angle + 10)
+        playerContext.sprite.setAngle(angle)
         playerContext.movement = this.tweens.add({
             targets: playerContext.sprite,
             ease: 'Cubic',       // 'Cubic', 'Elastic', 'Bounce', 'Back'
@@ -422,7 +512,7 @@ export class Game extends Scene {
             return
 
         for (let i = 0; i < this.numPlayers; i++) {
-            const playerContext = this.players[i]
+            const playerContext = this.frogs[i]
             if (!playerContext.alive)
                 continue
             if (playerContext.movement && playerContext.movement.isActive()) {
