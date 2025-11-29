@@ -320,7 +320,7 @@ export class Game extends Scene {
 
         const bestBrainsWithFitness = brainsWithFitness.slice(0, TOP_WINNERS_COUNT);
         //console.log("Selecting ", bestBrainsWithFitness.length, "winners");
-        //bestBrainsWithFitness.forEach((winner, winnerIndex) => console.log("\t[", winnerIndex, "] fitness=", winner.fitness));
+        //bestBrainsWithFitness.forEach((winner, winnerIndex) => console.log(winnerIndex, "fitness:", winner.fitness, "sprite.y:", winner.));
         const bestBrains = bestBrainsWithFitness.map((bf) => bf.brain);
         const offsprings: Network[] = [];
         //this.fitProxy.fittest = winners[0].gameObject.fitness;
@@ -364,7 +364,7 @@ export class Game extends Scene {
         const progressionFitness =
             Math.abs(Math.max(Math.min(frogContext.sprite.y, PLAYER_START_Y), GOAL_LINE_Y) - PLAYER_START_Y) / DISTANCE_TO_TRAVEL;
         const survivalityFitness = frogContext.alive ? 1 : (frogContext.timeOfdeath! - this.lastResetTimer) / gameDuration;
-        const fitness = progressionFitness; // (7 * progressionFitness + survivalityFitness) / 8;
+        const fitness = progressionFitness * survivalityFitness; // (7 * progressionFitness + survivalityFitness) / 8;
         // console.log("progressFitness:", progressionFitness, "survivalityFitness:", survivalityFitness, "fitness:", fitness);
 
         return fitness;
@@ -431,10 +431,10 @@ export class Game extends Scene {
         ].filter((key) => layers[key]);
 
         const positions = new Map<number, { x: number; y: number }>();
-        const graphOffsetX = 40;
-        const graphOffsetY = 40;
-        const layerSpacing = 140;
-        const graphHeight = 320;
+        const graphOffsetX = 50;
+        const graphOffsetY = 60;
+        const layerSpacing = 200;
+        const graphHeight = 420;
 
         orderedLayerKeys.forEach((layerKey, layerIndex) => {
             const neuronIndices = layers[layerKey];
@@ -445,12 +445,16 @@ export class Game extends Scene {
                 positions.set(neuronIndex, { x, y });
 
                 const bias = bestBrainJSON.neurons[neuronIndex].bias;
-                this.brainGraphics.fillStyle(0x1a1a1a, 0.9);
-                this.brainGraphics.fillCircle(x, y, 12);
-                this.brainGraphics.lineStyle(1, 0xffffff, 0.8);
-                this.brainGraphics.strokeCircle(x, y, 12);
+                const biasAbs = Math.abs(bias);
+                const biasColor = bias >= 0 ? 0x00cc99 : 0xff3366;
+                const biasStroke = Phaser.Math.Clamp(1 + biasAbs * 3, 1, 6);
 
-                const biasLabel = this.add.text(x, y, bias.toFixed(2), { fontSize: "10px", color: "#ffffff" }).setOrigin(0.5);
+                this.brainGraphics.fillStyle(biasColor, 0.35);
+                this.brainGraphics.fillCircle(x, y, 16);
+                this.brainGraphics.lineStyle(biasStroke, biasColor, 0.9);
+                this.brainGraphics.strokeCircle(x, y, 16);
+
+                const biasLabel = this.add.text(x, y, bias.toFixed(2), { fontSize: "12px", color: "#ffffff" }).setOrigin(0.5);
                 biasLabel.setDepth(30);
                 this.brainLabels.push(biasLabel);
             });
@@ -466,7 +470,7 @@ export class Game extends Scene {
             const weightAbs = Math.abs(weight);
             const color = weight >= 0 ? 0x00cc99 : 0xff3366;
             const thickness = Phaser.Math.Clamp(1 + weightAbs * 2, 1, 4);
-            const alpha = Phaser.Math.Clamp(0.4 + weightAbs * 0.6, 0.4, 1);
+            const alpha = 0.4; //Phaser.Math.Clamp(0.4 + weightAbs * 0.6, 0.4, 1);
 
             this.brainGraphics.lineStyle(thickness, color, alpha);
             this.brainGraphics.beginPath();
@@ -476,9 +480,9 @@ export class Game extends Scene {
 
             const midX = (fromPos.x + toPos.x) / 2;
             const midY = (fromPos.y + toPos.y) / 2;
-            const weightLabel = this.add.text(midX, midY, weight.toFixed(2), { fontSize: "9px", color: "#ffffff" }).setOrigin(0.5);
-            weightLabel.setDepth(30);
-            this.brainLabels.push(weightLabel);
+            //const weightLabel = this.add.text(midX, midY, weight.toFixed(2), { fontSize: "11px", color: "#ffffff" }).setOrigin(0.5);
+            //weightLabel.setDepth(30);
+            //this.brainLabels.push(weightLabel);
         });
     }
 

@@ -1,7 +1,7 @@
-export const MAX_FROGS = 6;
-export const MUTATE_RATE = 0.3;
-export const TOP_WINNERS_COUNT = 3;
-export const CROSSOVER_WINNER_COUNT = 0;
+export const MAX_FROGS = 30;
+export const MUTATE_RATE = 0.5;
+export const TOP_WINNERS_COUNT = 8;
+export const CROSSOVER_WINNER_COUNT = 3;
 export const RESET_TIMER = 6000;
 
 export const FROG_HIT_BOX_X = 20;
