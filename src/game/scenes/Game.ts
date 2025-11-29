@@ -334,17 +334,17 @@ export class Game extends Scene {
                 const parentA = bestBrains[0].toJSON();
                 const parentB = bestBrains[1].toJSON();
                 offspring = this.crossOver(parentA, parentB);
-            } else if (i < MAX_FROGS - CROSSOVER_WINNER_COUNT) {
+            } else /* if (i < MAX_FROGS - CROSSOVER_WINNER_COUNT) */ {
                 // if within maxUnits - count, crossover between two random winners
                 //console.log("\t[", i, "] CrossOver with random winners ");
                 const parentA = this.getRandomBrain(bestBrains).toJSON();
                 const parentB = this.getRandomBrain(bestBrains).toJSON();
                 offspring = this.crossOver(parentA, parentB);
-            } else {
+            } /* else {
                 // clone from a random winner based upon fitness
                 //console.log("\t[", i, "] Clone from a random winner ");
                 offspring = this.getRandomProbBrain(bestBrainsWithFitness).brain.toJSON();
-            }
+            }*/
 
             // mutate offspring for randomness of evolution
             offspring = this.mutation(offspring);
@@ -514,6 +514,7 @@ export class Game extends Scene {
             }
         }
         const brains = this.evolveBrains();
+        console.assert(brains.length === this.frogs.length);
         console.log("Total fitness=", totalFitness, ", mean fitness: ", totalFitness / MAX_FROGS);
         this.lastBestFrogIndex = 0;
         this.sensorGraphics.clear();
@@ -693,10 +694,6 @@ export class Game extends Scene {
     }
 
     update(time: number, delta: number): void {
-        const bestFrog = this.frogs[this.lastBestFrogIndex];
-        if (!bestFrog || !bestFrog.alive || bestFrog.sprite.y <= GOAL_LINE_Y) {
-            this.sensorGraphics.clear();
-        }
         if (time > this.lastResetTimer + RESET_TIMER) {
             this.resetGame();
             this.lastResetTimer = time;
