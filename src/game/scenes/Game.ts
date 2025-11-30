@@ -389,7 +389,11 @@ export class Game extends Scene {
             Math.abs(Math.max(Math.min(frogContext.sprite.y, PLAYER_START_Y), GOAL_LINE_Y) - PLAYER_START_Y) / DISTANCE_TO_TRAVEL;
         const survivalityFitness = frogContext.alive ? 1 : (frogContext.timeOfdeath! - this.lastResetTimer) / gameDuration;
         const centerX = GAME_WIDTH / 2;
-        const horizontalFitness = Math.max(0, 1 - Math.abs(frogContext.sprite.x - centerX) / centerX);
+        const plateauRadius = GAME_WIDTH / 3; // middle 2/3 of the screen
+        const distanceFromCenter = Math.abs(frogContext.sprite.x - centerX);
+        const taperRange = centerX - plateauRadius; // distance from plateau edge to screen edge
+        const taper = Phaser.Math.Clamp((centerX - distanceFromCenter) / taperRange, 0, 1);
+        const horizontalFitness = distanceFromCenter <= plateauRadius ? 1 : taper;
         const fitness = progressionFitness * 0.6 + survivalityFitness * 0.3 + horizontalFitness * 0.1;
         // console.log("progressFitness:", progressionFitness, "survivalityFitness:", survivalityFitness, "fitness:", fitness);
 
