@@ -5,6 +5,7 @@ export const CROSSOVER_WINNER_COUNT = 3;
 export const MUTATION_LOWER_BOUND = -10;
 export const MUTATION_UPPER_BOUND = 10;
 export const RESET_TIMER = 8000;
+export const GAME_WIDTH = 640;
 
 export const FROG_JUMP_DISTANCE = 20;
 export const FROG_JUMP_SPEED = 100;

@@ -4,6 +4,7 @@ import {
     CROSSOVER_WINNER_COUNT,
     MAX_FROGS,
     GOAL_LINE_Y,
+    GAME_WIDTH,
     MUTATE_RATE,
     RESET_TIMER,
     TOP_WINNERS_COUNT,
@@ -46,7 +47,7 @@ export class Game extends Scene {
     cursor!: Phaser.Types.Input.Keyboard.CursorKeys;
     frogs!: FrogContext[];
     lanes!: LaneConfig[];
-    gameWidth: number = 640;
+    gameWidth: number = GAME_WIDTH;
     gameHeight: number = 880;
     lastResetTimer: number;
     sensorGraphics!: Phaser.GameObjects.Graphics;
@@ -387,7 +388,9 @@ export class Game extends Scene {
         const progressionFitness =
             Math.abs(Math.max(Math.min(frogContext.sprite.y, PLAYER_START_Y), GOAL_LINE_Y) - PLAYER_START_Y) / DISTANCE_TO_TRAVEL;
         const survivalityFitness = frogContext.alive ? 1 : (frogContext.timeOfdeath! - this.lastResetTimer) / gameDuration;
-        const fitness = progressionFitness * survivalityFitness; // (7 * progressionFitness + survivalityFitness) / 8;
+        const centerX = GAME_WIDTH / 2;
+        const horizontalFitness = Math.max(0, 1 - Math.abs(frogContext.sprite.x - centerX) / centerX);
+        const fitness = progressionFitness * 0.6 + survivalityFitness * 0.3 + horizontalFitness * 0.1;
         // console.log("progressFitness:", progressionFitness, "survivalityFitness:", survivalityFitness, "fitness:", fitness);
 
         return fitness;
